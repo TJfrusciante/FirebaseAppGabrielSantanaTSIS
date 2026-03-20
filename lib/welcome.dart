@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import 'package:myapp/auth_service.dart';
 
-class WelcomeMessage extends StatelessWidget {
-  const WelcomeMessage({super.key});
+class WelcomeScreen extends StatelessWidget {
+  const WelcomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('config').doc('welcome').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasData && snapshot.data!.exists) {
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          return Text(data['text']);
-        } else if (snapshot.hasError) {
-          return Text('Error: ${snapshot.error}');
-        } else {
-          return const CircularProgressIndicator();
-        }
-      },
+    final authService = Provider.of<AuthService>(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Welcome'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await authService.signOut();
+            },
+          ),
+        ],
+      ),
+      body: const Center(
+        child: Text('You are logged in!'),
+      ),
     );
   }
 }
