@@ -23,7 +23,7 @@ class AuthService with ChangeNotifier {
   }) async {
     try {
       await _auth.signInWithEmailAndPassword(email: email, password: password);
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseAuthException {
       rethrow;
     }
   }
@@ -34,7 +34,7 @@ class AuthService with ChangeNotifier {
   }) async {
     try {
       await _auth.createUserWithEmailAndPassword(email: email, password: password);
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseAuthException {
       rethrow;
     }
   }

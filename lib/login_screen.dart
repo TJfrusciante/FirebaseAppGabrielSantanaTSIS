@@ -7,10 +7,10 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  LoginScreenState createState() => LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -28,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
           password: _passwordController.text,
         );
       } on FirebaseAuthException catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(e.message ?? 'Failed to sign in'),
@@ -53,6 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
           password: _passwordController.text,
         );
       } on FirebaseAuthException catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(e.message ?? 'Failed to sign up'),
