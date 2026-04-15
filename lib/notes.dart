@@ -130,16 +130,16 @@ class _NotesPageState extends State<NotesPage> {
     Map<String, dynamic> data,
   ) {
     final pos = data['position'];
-    final gp = pos is GeoPoint ? pos : null;
+    ll.LatLng? initialLatLng;
+    if (pos is GeoPoint) {
+      initialLatLng = ll.LatLng(pos.latitude, pos.longitude);
+    } else if (pos is Map && pos['geopoint'] is GeoPoint) {
+      final gp = pos['geopoint'] as GeoPoint;
+      initialLatLng = ll.LatLng(gp.latitude, gp.longitude);
+    }
 
-    final ll.LatLng? initialLatLng = gp == null
-        ? null
-        : ll.LatLng(gp.latitude, gp.longitude);
     final double? initialZoom = (data['zoom'] as num?)?.toDouble();
-    final String? initialAddress =
-        (data['address'] as String?)?.trim().isEmpty == true
-        ? null
-        : data['address']?.toString();
+    final String? initialAddress = (data['address'] as String?)?.trim();
 
     Navigator.push(
       context,
@@ -152,6 +152,13 @@ class _NotesPageState extends State<NotesPage> {
         ),
       ),
     );
+  }
+
+  String? _routeSubtitle(Map<String, dynamic> data) {
+    final String? address = (data['address'] as String?)?.trim();
+    if (address != null && address.isNotEmpty) return address;
+
+    return null;
   }
 
   @override
@@ -220,7 +227,6 @@ class _NotesPageState extends State<NotesPage> {
                         final doc = docs[i];
                         final data = doc.data();
                         final isEditing = editingId == doc.id;
-                        final address = (data['address'] ?? '').toString();
 
                         if (isEditing) {
                           return Padding(
@@ -260,12 +266,14 @@ class _NotesPageState extends State<NotesPage> {
                           );
                         }
 
+                        final subtitleText = _routeSubtitle(data);
+
                         return ListTile(
                           title: Text((data['description'] ?? '').toString()),
-                          subtitle: address.isEmpty
+                          subtitle: subtitleText == null
                               ? null
                               : Text(
-                                  address,
+                                  subtitleText,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),

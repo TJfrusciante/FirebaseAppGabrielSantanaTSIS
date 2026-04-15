@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
+import 'services.dart';
 
 class MapViewerEditorPage extends StatefulWidget {
   final DocumentReference<Map<String, dynamic>> noteRef;
@@ -56,21 +57,20 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
 
   Future<String> _reverseGeocode(ll.LatLng point) async {
     final uri = Uri.parse(
-      'https://nominatim.openstreetmap.org/reverse'
-      '?lat=${point.latitude}&lon=${point.longitude}'
-      '&format=json&addressdetails=1',
+      'https://api.openrouteservice.org/geocode/reverse'
+      '?api_key=${ApiKeys.heigit}&point.lon=${point.longitude}&point.lat=${point.latitude}'
     );
     try {
       final resp = await http.get(
         uri,
         headers: const {
-          'User-Agent': 'FirebaseApp/1.0 (gabrielosantana@outlook.com)',
           'Accept': 'application/json',
+          'User-Agent': 'FirebaseApp/1.0 (gabrielosantana@outlook.com)',
         },
       );
       if (resp.statusCode == 200) {
         final json = jsonDecode(resp.body) as Map<String, dynamic>;
-        return (json['display_name'] ?? '').toString();
+        return json['features'][0]['properties']['label'] ?? '';
       }
       return 'Endereço indisponível (HTTP ${resp.statusCode})';
     } catch (e) {
@@ -233,9 +233,7 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
             child: ListTile(
               leading: const Icon(Icons.place_outlined),
               title: Text(
-                _address.isEmpty
-                    ? 'Endereço ainda não definido.'
-                    : _address,
+                _address.isEmpty ? 'Endereço ainda não definido.' : _address,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
