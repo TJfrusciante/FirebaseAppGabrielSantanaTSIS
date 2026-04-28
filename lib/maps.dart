@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -119,7 +120,9 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
        if (_zoom <= _worldZoom) _zoom = 14;
      });
      _safeMove(p, _zoom);
-   } catch (_) {}
+   } catch (e, s) {
+     developer.log('Failed to get current position', error: e, stackTrace: s);
+   }
  }
 
  Future<bool> _ensureLocationPermission() async {
@@ -127,7 +130,7 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
    if (!enabled) {
      if (mounted) {
        ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text('Serviço de localização desativado.')),
+         const SnackBar(content: Text('Location service is disabled.')),
        );
      }
      return false;
@@ -140,7 +143,7 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
        permission == LocationPermission.deniedForever) {
      if (mounted) {
        ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text('Permissão de localização negada.')),
+         const SnackBar(content: Text('Location permission denied.')),
        );
      }
      return false;
@@ -157,8 +160,11 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
      final data = snap.data();
      final k = (data?['key'] ?? '').toString().trim();
      if (k.isNotEmpty) return k;
-   } catch (_) {}
-   final fromDefine = const String.fromEnvironment(
+   } catch (e, s) {
+     developer.log('Failed to get OSR API key from Firestore',
+         error: e, stackTrace: s);
+   }
+   const fromDefine = String.fromEnvironment(
      'ORS_API_KEY',
      defaultValue: '',
    );
@@ -168,7 +174,9 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
  void _safeMove(ll.LatLng center, double zoom) {
    try {
      _mapController.move(center, zoom);
-   } catch (_) {}
+   } catch (e, s) {
+     developer.log('Failed to move map', error: e, stackTrace: s);
+   }
  }
 
  List<ll.LatLng> _sanitizePoints(List<ll.LatLng> pts) {
@@ -188,27 +196,19 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
  void _fitToPoints(List<ll.LatLng> pts) {
    final clean = _sanitizePoints(pts);
    if (clean.isEmpty) return;
-   double minLat = clean.first.latitude;
-   double maxLat = clean.first.latitude;
-   double minLng = clean.first.longitude;
-   double maxLng = clean.first.longitude;
-   for (final p in clean) {
-     minLat = math.min(minLat, p.latitude);
-     maxLat = math.max(maxLat, p.latitude);
-     minLng = math.min(minLng, p.longitude);
-     maxLng = math.max(maxLng, p.longitude);
-   }
    try {
-     final bounds = LatLngBounds(
-       ll.LatLng(minLat, minLng),
-       ll.LatLng(maxLat, maxLng),
-     );
+     final bounds = LatLngBounds.fromPoints(clean);
      _mapController.fitCamera(
-       CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(24)),
+       CameraFit.bounds(
+         bounds: bounds,
+         padding: const EdgeInsets.all(32), // Increased padding
+       ),
      );
-   } catch (_) {
-     final center = ll.LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
-     _safeMove(center, _zoom);
+   } catch (e, s) {
+     developer.log('Failed to fit map to bounds', error: e, stackTrace: s);
+     if (clean.isNotEmpty) {
+       _safeMove(clean.first, _zoom);
+     }
    }
  }
 
@@ -227,9 +227,9 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
        final json = jsonDecode(resp.body) as Map<String, dynamic>;
        return (json['display_name'] ?? '').toString();
      }
-     return 'Endereço indisponível (HTTP ${resp.statusCode})';
+     return 'Address unavailable (HTTP ${resp.statusCode})';
    } catch (e) {
-     return 'Endereço indisponível ($e)';
+     return 'Address unavailable ($e)';
    }
  }
 
@@ -237,7 +237,7 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
    final List<ll.LatLng> points = [];
    int index = 0, lat = 0, lng = 0;
    int shift, result, b;
-   final factor = math.pow(10, precision).round();
+   final factor = math.pow(10, precision);
    while (index < polyline.length) {
      shift = 0;
      result = 0;
@@ -265,18 +265,17 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
  }
 
  String _encodePolyline(List<ll.LatLng> pts, {int precision = 6}) {
-   final factor = math.pow(10, precision).round();
+   final factor = math.pow(10, precision);
    int prevLat = 0, prevLng = 0;
    final sb = StringBuffer();
 
-   int encodeValue(int v) {
+   void encodeValue(int v) {
      v = v < 0 ? ~(v << 1) : (v << 1);
      while (v >= 0x20) {
        sb.writeCharCode((0x20 | (v & 0x1f)) + 63);
        v >>= 5;
      }
      sb.writeCharCode(v + 63);
-     return v;
    }
 
    for (final p in pts) {
@@ -311,14 +310,12 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
      if (mounted) {
        ScaffoldMessenger.of(
          context,
-       ).showSnackBar(const SnackBar(content: Text('Chave ORS ausente.')));
+       ).showSnackBar(const SnackBar(content: Text('ORS API key is missing.')));
      }
      return;
    }
 
-   final profile = widget.orsProfile.isEmpty
-       ? 'driving-car'
-       : widget.orsProfile;
+   final profile = widget.orsProfile.isEmpty ? 'driving-car' : widget.orsProfile;
    final url = Uri.parse(
      'https://api.openrouteservice.org/v2/directions/$profile/geojson',
    );
@@ -351,7 +348,7 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
        if (features.isEmpty) {
          if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(content: Text('Rota não encontrada.')),
+             const SnackBar(content: Text('Route not found.')),
            );
          }
          return;
@@ -378,7 +375,7 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
        if (_routePoints.isEmpty) {
          if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(content: Text('Rota não encontrada.')),
+             const SnackBar(content: Text('Route not found.')),
            );
          }
          return;
@@ -392,16 +389,17 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
        if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
            SnackBar(
-             content: Text('Falha ao buscar rota (HTTP ${resp.statusCode}).'),
+             content: Text('Failed to fetch route (HTTP ${resp.statusCode}).'),
            ),
          );
        }
      }
-   } catch (e) {
+   } catch (e, s) {
+     developer.log('Error fetching route', error: e, stackTrace: s);
      if (mounted) {
        ScaffoldMessenger.of(
          context,
-       ).showSnackBar(SnackBar(content: Text('Erro ao buscar rota: $e')));
+       ).showSnackBar(SnackBar(content: Text('Error fetching route: $e')));
      }
    }
  }
@@ -410,75 +408,78 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
    if (_initialPoint == null) {
      ScaffoldMessenger.of(
        context,
-     ).showSnackBar(const SnackBar(content: Text('Defina o ponto Inicial.')));
+     ).showSnackBar(const SnackBar(content: Text('Set the initial point.')));
      return;
    }
 
    setState(() => _saving = true);
 
-   if (_initialAddress.isEmpty) {
-     _initialAddress = await _reverseGeocode(_initialPoint!);
-   }
-   if (_finalPoint != null && _finalAddress.isEmpty) {
-     _finalAddress = await _reverseGeocode(_finalPoint!);
-   }
-   if (_initialPoint != null &&
-       _finalPoint != null &&
-       (_routePoints.isEmpty || _routePolyline6 == null)) {
-     await _fetchRoute(_initialPoint!, _finalPoint!);
-     if (_routePoints.isEmpty) {
-       if (mounted) setState(() => _saving = false);
-       return;
-     }
-   }
-
-   final Map<String, dynamic> payload = {
-     'zoom': _zoom,
-     'updatedAt': FieldValue.serverTimestamp(),
-   };
-
-   final igfp = GeoFirePoint(
-     GeoPoint(_initialPoint!.latitude, _initialPoint!.longitude),
-   );
-   payload['position'] = igfp.data;
-   payload['address'] = _initialAddress;
-   payload['initial'] = {'position': igfp.data, 'address': _initialAddress};
-
-   if (_finalPoint != null) {
-     final fgfp = GeoFirePoint(
-       GeoPoint(_finalPoint!.latitude, _finalPoint!.longitude),
-     );
-     payload['final'] = {'position': fgfp.data, 'address': _finalAddress};
-   } else {
-     payload['final'] = FieldValue.delete();
-   }
-
-   if (_initialPoint != null && _finalPoint != null) {
-     payload['distanceM'] = _routeDistanceM;
-     payload['durationS'] = _routeDurationS;
-     payload['polyline6'] = _routePolyline6;
-     payload['mode'] = widget.orsProfile;
-   } else {
-     payload['distanceM'] = FieldValue.delete();
-     payload['durationS'] = FieldValue.delete();
-     payload['polyline6'] = FieldValue.delete();
-     payload['mode'] = FieldValue.delete();
-   }
-
    try {
+     if (_initialAddress.isEmpty) {
+       _initialAddress = await _reverseGeocode(_initialPoint!);
+     }
+     if (_finalPoint != null && _finalAddress.isEmpty) {
+       _finalAddress = await _reverseGeocode(_finalPoint!);
+     }
+     if (_initialPoint != null &&
+         _finalPoint != null &&
+         (_routePoints.isEmpty || _routePolyline6 == null)) {
+       await _fetchRoute(_initialPoint!, _finalPoint!);
+       if (_routePoints.isEmpty) {
+         if (mounted) setState(() => _saving = false);
+         return;
+       }
+     }
+
+     final Map<String, dynamic> payload = {
+       'zoom': _zoom,
+       'updatedAt': FieldValue.serverTimestamp(),
+     };
+
+     final igfp = GeoFirePoint(
+       GeoPoint(_initialPoint!.latitude, _initialPoint!.longitude),
+     );
+     payload['position'] = igfp.data;
+     payload['address'] = _initialAddress;
+     payload['initial'] = {'position': igfp.data, 'address': _initialAddress};
+
+     if (_finalPoint != null) {
+       final fgfp = GeoFirePoint(
+         GeoPoint(_finalPoint!.latitude, _finalPoint!.longitude),
+       );
+       payload['final'] = {'position': fgfp.data, 'address': _finalAddress};
+     } else {
+       payload['final'] = FieldValue.delete();
+     }
+
+     if (_initialPoint != null && _finalPoint != null) {
+       payload['distanceM'] = _routeDistanceM;
+       payload['durationS'] = _routeDurationS;
+       payload['polyline6'] = _routePolyline6;
+       payload['mode'] = widget.orsProfile;
+     } else {
+       payload['distanceM'] = FieldValue.delete();
+       payload['durationS'] = FieldValue.delete();
+       payload['polyline6'] = FieldValue.delete();
+       payload['mode'] = FieldValue.delete();
+     }
+
      await widget.noteRef.set(payload, SetOptions(merge: true));
      if (!mounted) return;
-     setState(() => _saving = false);
      ScaffoldMessenger.of(
        context,
-     ).showSnackBar(const SnackBar(content: Text('Dados salvos.')));
+     ).showSnackBar(const SnackBar(content: Text('Data saved.')));
      Navigator.pop(context);
-   } catch (e) {
+   } catch (e, s) {
+     developer.log('Failed to save data', error: e, stackTrace: s);
      if (!mounted) return;
-     setState(() => _saving = false);
      ScaffoldMessenger.of(
        context,
-     ).showSnackBar(SnackBar(content: Text('Falha ao remover: $e')));
+     ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+   } finally {
+     if (mounted) {
+       setState(() => _saving = false);
+     }
    }
  }
 
@@ -486,16 +487,16 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
    final ok = await showDialog<bool>(
      context: context,
      builder: (_) => AlertDialog(
-       title: const Text('Limpar mapa'),
-       content: const Text('Remover localização e rota?'),
+       title: const Text('Clear map'),
+       content: const Text('Remove location and route?'),
        actions: [
          TextButton(
            onPressed: () => Navigator.pop(context, false),
-           child: const Text('Cancelar'),
+           child: const Text('Cancel'),
          ),
          FilledButton.tonal(
            onPressed: () => Navigator.pop(context, true),
-           child: const Text('Remover'),
+           child: const Text('Remove'),
          ),
        ],
      ),
@@ -529,12 +530,13 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
      });
      ScaffoldMessenger.of(
        context,
-     ).showSnackBar(const SnackBar(content: Text('Dados removidos.')));
-   } catch (e) {
+     ).showSnackBar(const SnackBar(content: Text('Data removed.')));
+   } catch (e, s) {
+     developer.log('Failed to clear data', error: e, stackTrace: s);
      if (!mounted) return;
      ScaffoldMessenger.of(
        context,
-     ).showSnackBar(SnackBar(content: Text('Falha ao remover: $e')));
+     ).showSnackBar(SnackBar(content: Text('Failed to remove: $e')));
    }
  }
 
@@ -550,6 +552,9 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
      _routePolyline6 = null;
      _routeDistanceM = null;
      _routeDurationS = null;
+     if (_initialPoint != null && _finalPoint != null) {
+       _fetchRoute(_initialPoint!, _finalPoint!);
+     }
    });
  }
 
@@ -559,25 +564,25 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
      if (_initialPoint != null)
        Marker(
          point: _initialPoint!,
-         width: 36,
-         height: 36,
-         child: const Icon(Icons.flag, size: 36, color: Colors.green),
+         width: 40,
+         height: 40,
+         child: const Icon(Icons.flag, size: 40, color: Colors.green),
        ),
      if (_finalPoint != null)
        Marker(
          point: _finalPoint!,
-         width: 36,
-         height: 36,
-         child: const Icon(Icons.flag_circle, size: 36, color: Colors.blue),
+         width: 40,
+         height: 40,
+         child: const Icon(Icons.flag_circle, size: 40, color: Colors.blue),
        ),
    ];
 
    return Scaffold(
      appBar: AppBar(
-       title: const Text('Mapa'),
+       title: const Text('Map'),
        actions: [
          IconButton(
-           tooltip: 'Limpar',
+           tooltip: 'Clear',
            onPressed: _saving ? null : _clearAll,
            icon: const Icon(Icons.delete),
          ),
@@ -590,168 +595,170 @@ class _MapViewerEditorPageState extends State<MapViewerEditorPage> {
                    child: CircularProgressIndicator(strokeWidth: 2),
                  )
                : const Icon(Icons.check),
-           label: const Text('Salvar'),
+           label: const Text('Save'),
          ),
        ],
      ),
      body: Column(
        children: [
          Expanded(
-           child: Center(
-             child: SizedBox(
-               width: 1000,
-               height: 650,
-               child: FlutterMap(
-                 mapController: _mapController,
-                 options: MapOptions(
-                   initialCenter: _initialPoint ?? _finalPoint ?? _worldCenter,
-                   initialZoom: (_initialPoint != null || _finalPoint != null)
-                       ? _zoom
-                       : _worldZoom,
-                   onTap: (tapPos, point) {
-                     setState(() {
-                       if (_mode == MapEditorMode.initial) {
-                         _initialPoint = point;
-                         _initialAddress = '';
-                         _routePoints.clear();
-                         _routePolyline6 = null;
-                         _routeDistanceM = null;
-                         _routeDurationS = null;
-                       } else {
-                         _finalPoint = point;
-                         _finalAddress = '';
-                         _routePoints.clear();
-                         _routePolyline6 = null;
-                         _routeDistanceM = null;
-                         _routeDurationS = null;
-                       }
-                     });
-                   },
-                   onPositionChanged: (camera, hasGesture) {
-                     _zoom = camera.zoom;
-                   },
+           child: FlutterMap(
+             mapController: _mapController,
+             options: MapOptions(
+               initialCenter: _initialPoint ?? _finalPoint ?? _worldCenter,
+               initialZoom:
+                   (_initialPoint != null || _finalPoint != null) ? _zoom : _worldZoom,
+               onTap: (tapPos, point) {
+                 setState(() {
+                   if (_mode == MapEditorMode.initial) {
+                     _initialPoint = point;
+                     _initialAddress = '';
+                   } else {
+                     _finalPoint = point;
+                     _finalAddress = '';
+                   }
+                   _routePoints.clear();
+                   _routePolyline6 = null;
+                   _routeDistanceM = null;
+                   _routeDurationS = null;
+                 });
+               },
+               onPositionChanged: (camera, hasGesture) {
+                 if (hasGesture) {
+                   _zoom = camera.zoom;
+                 }
+               },
+             ),
+             children: [
+               TileLayer(
+                 urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                 subdomains: const ['a', 'b', 'c'],
+                 // TODO: Replace with your app's package name to comply with OSM tile usage policy.
+                 // You can use the package_info_plus package to get this dynamically.
+                 userAgentPackageName: 'com.example.app',
+               ),
+               if (_routePoints.isNotEmpty)
+                 PolylineLayer(
+                   polylines: [
+                     Polyline(
+                       points: _routePoints,
+                       strokeWidth: 5,
+                       color: Colors.blue,
+                       borderColor: Colors.blue.withOpacity(0.5),
+                       borderStrokeWidth: 2,
+                     ),
+                   ],
                  ),
-                 children: [
-                   TileLayer(
-                     urlTemplate:
-                         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                     subdomains: const ['a', 'b', 'c'],
-                     userAgentPackageName: 'com.example.myapp',
-                   ),
-                   MarkerLayer(markers: markers),
-                   if (_routePoints.isNotEmpty)
-                     PolylineLayer(
-                       polylines: [
-                         Polyline(points: _routePoints, strokeWidth: 4),
+               MarkerLayer(markers: markers),
+             ],
+           ),
+         ),
+         Material(
+           elevation: 4,
+           child: Padding(
+             padding: const EdgeInsets.all(8.0),
+             child: Column(
+               mainAxisSize: MainAxisSize.min,
+               children: [
+                 Row(
+                   mainAxisAlignment: MainAxisAlignment.center,
+                   children: [
+                     Wrap(
+                       spacing: 8,
+                       runSpacing: 8,
+                       alignment: WrapAlignment.center,
+                       children: [
+                         FilterChip(
+                           label: const Text('Initial'),
+                           selected: _mode == MapEditorMode.initial,
+                           onSelected: (v) =>
+                               setState(() => _mode = MapEditorMode.initial),
+                         ),
+                         FilterChip(
+                           label: const Text('Final'),
+                           selected: _mode == MapEditorMode.finalPoint,
+                           onSelected: (v) =>
+                               setState(() => _mode = MapEditorMode.finalPoint),
+                         ),
+                         FilledButton.tonalIcon(
+                           onPressed: (_initialPoint != null && _finalPoint != null)
+                               ? () => _fetchRoute(_initialPoint!, _finalPoint!)
+                               : null,
+                           icon: const Icon(Icons.alt_route),
+                           label: const Text('Route'),
+                         ),
+                         OutlinedButton.icon(
+                           onPressed: (_initialPoint != null || _finalPoint != null)
+                               ? _swapInitialFinal
+                               : null,
+                           icon: const Icon(Icons.swap_vert),
+                           label: const Text('Swap'),
+                         ),
                        ],
                      ),
-                 ],
-               ),
-             ),
-           ),
-         ),
-         Material(
-           color: Theme.of(context).colorScheme.surfaceContainerLow,
-           child: Padding(
-             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-             child: Wrap(
-               spacing: 8,
-               runSpacing: 8,
-               children: [
-                 FilterChip(
-                   label: const Text('Inicial'),
-                   selected: _mode == MapEditorMode.initial,
-                   onSelected: (v) => setState(
-                     () => _mode = v ? MapEditorMode.initial : _mode,
+                   ],
+                 ),
+                 const Divider(height: 16),
+                 ListTile(
+                   leading: const Icon(Icons.flag, color: Colors.green),
+                   title: Text(
+                     _initialAddress.isEmpty
+                         ? 'Initial: Not defined'
+                         : 'Initial: $_initialAddress',
+                     maxLines: 2,
+                     overflow: TextOverflow.ellipsis,
+                   ),
+                   trailing: IconButton(
+                     tooltip: 'Search address',
+                     onPressed: _initialPoint == null || _saving
+                         ? null
+                         : () async {
+                             final addr = await _reverseGeocode(_initialPoint!);
+                             if (!mounted) return;
+                             setState(() => _initialAddress = addr);
+                           },
+                     icon: const Icon(Icons.search),
                    ),
                  ),
-                 FilterChip(
-                   label: const Text('Final'),
-                   selected: _mode == MapEditorMode.finalPoint,
-                   onSelected: (v) => setState(
-                     () => _mode = v ? MapEditorMode.finalPoint : _mode,
+                 ListTile(
+                   leading: const Icon(Icons.flag_circle, color: Colors.blue),
+                   title: Text(
+                     _finalAddress.isEmpty
+                         ? 'Final: Not defined'
+                         : 'Final: $_finalAddress',
+                     maxLines: 2,
+                     overflow: TextOverflow.ellipsis,
+                   ),
+                   trailing: IconButton(
+                     tooltip: 'Search address',
+                     onPressed: _finalPoint == null || _saving
+                         ? null
+                         : () async {
+                             final addr = await _reverseGeocode(_finalPoint!);
+                             if (!mounted) return;
+                             setState(() => _finalAddress = addr);
+                           },
+                     icon: const Icon(Icons.search),
                    ),
                  ),
-                 FilledButton.tonalIcon(
-                   onPressed: (_initialPoint != null && _finalPoint != null)
-                       ? () => _fetchRoute(_initialPoint!, _finalPoint!)
-                       : null,
-                   icon: const Icon(Icons.alt_route),
-                   label: const Text('Rota'),
-                 ),
-                 OutlinedButton.icon(
-                   onPressed: (_initialPoint != null || _finalPoint != null)
-                       ? _swapInitialFinal
-                       : null,
-                   icon: const Icon(Icons.swap_vert),
-                   label: const Text('Inverter'),
-                 ),
+                 if (_routeDistanceM != null && _routeDurationS != null)
+                   Padding(
+                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                     child: Row(
+                       mainAxisAlignment: MainAxisAlignment.center,
+                       children: [
+                         const Icon(Icons.route, size: 16),
+                         const SizedBox(width: 8),
+                         Text(
+                           '${(_routeDistanceM! / 1000).toStringAsFixed(2)} km  ·  '
+                           '${(_routeDurationS! / 60).toStringAsFixed(0)} min',
+                           style: Theme.of(context).textTheme.bodySmall,
+                         ),
+                       ],
+                     ),
+                   ),
                ],
              ),
-           ),
-         ),
-         Material(
-           color: Theme.of(context).colorScheme.surfaceContainerLow,
-           child: Column(
-             children: [
-               ListTile(
-                 leading: const Icon(Icons.flag, color: Colors.green),
-                 title: Text(
-                   _initialAddress.isEmpty
-                       ? 'Inicial: endereço não definido.'
-                       : 'Inicial: $_initialAddress',
-                   maxLines: 2,
-                   overflow: TextOverflow.ellipsis,
-                 ),
-                 trailing: FilledButton.tonalIcon(
-                   onPressed: _initialPoint == null || _saving
-                       ? null
-                       : () async {
-                           final addr = await _reverseGeocode(_initialPoint!);
-                           if (!mounted) return;
-                           setState(() => _initialAddress = addr);
-                         },
-                   icon: const Icon(Icons.search),
-                   label: const Text('Buscar endereço'),
-                 ),
-               ),
-               ListTile(
-                 leading: const Icon(Icons.flag_circle, color: Colors.blue),
-                 title: Text(
-                   _finalAddress.isEmpty
-                       ? 'Final: endereço não definido.'
-                       : 'Final: $_finalAddress',
-                   maxLines: 2,
-                   overflow: TextOverflow.ellipsis,
-                 ),
-                 trailing: FilledButton.tonalIcon(
-                   onPressed: _finalPoint == null || _saving
-                       ? null
-                       : () async {
-                           final addr = await _reverseGeocode(_finalPoint!);
-                           if (!mounted) return;
-                           setState(() => _finalAddress = addr);
-                         },
-                   icon: const Icon(Icons.search),
-                   label: const Text('Buscar endereço'),
-                 ),
-               ),
-               if (_routeDistanceM != null && _routeDurationS != null)
-                 Padding(
-                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                   child: Row(
-                     children: [
-                       const Icon(Icons.route),
-                       const SizedBox(width: 8),
-                       Text(
-                         'Distância: ${(_routeDistanceM! / 1000).toStringAsFixed(2)} km  ·  '
-                         'Duração: ${(_routeDurationS! / 60).toStringAsFixed(0)} min',
-                         style: Theme.of(context).textTheme.bodyMedium,
-                       ),
-                     ],
-                   ),
-                 ),
-             ],
            ),
          ),
        ],
